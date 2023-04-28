@@ -1,1 +1,3 @@
 # Machine-Learning-in-Predicting-Patient-Cost
+This study aims to develop a machine learning model for predicting the price of healthcare services for patients in the Medicare system. Using a dataset of patient demographics, medical history, and billing records, we trained several models to predict the price of healthcare services with high accuracy. We evaluated our model's performance using metrics such as root mean square error and R-squared. Our results show that machine learning can be a valuable tool for predicting healthcare costs, which can help patients, providers, and policymakers make informed decisions.
+Programming Language: R and R Studio
