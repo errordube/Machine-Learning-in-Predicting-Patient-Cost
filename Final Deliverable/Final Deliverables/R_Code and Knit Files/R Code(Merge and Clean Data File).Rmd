@@ -1,0 +1,188 @@
+---
+---
+#title: Merging and Cleaning all the three datasets
+#author: "Team 02 (Aditya Dube and Richard Budden)"
+
+
+#-#-# Merging and Cleaning all the three datasets #-#-#
+
+      ## Step 0: Basic Setup - Install Packages / Load Libraries
+      
+      ## Step 1: Collecting / Explore Data
+                 part a) Import Datasets
+                 part b ) Clean Datasets
+                 
+
+      ## Step 2: Prepare Data
+                 part a) Joining the Datasets
+                 part b) Remove, Code, and/or Impute Data
+                 part c) Variable Selection
+          
+                 
+  
+                  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+********************************************************************************
+## Step 0: Basic Setup - Install Packages / Load Libraries
+********************************************************************************
+```{r Install_Load, message=F, error=F, eval=T, warning=F}
+library(tidyverse)
+library(tidymodels)
+library("dplyr")
+library(stringr)
+```
+
+********************************************************************************
+## Step 1: Collecting / Explore Data     part a) Import Datasets
+********************************************************************************
+
+```{r Import_Datasets, message=F, error=F, eval=T, warning=F}
+medicare_data <- read.csv("Medicare_Provider_Charge_Inpatient_2018_data.csv")
+hospital_data <- read.csv("Hospital_General_Information.csv")
+census_data_original <- read.csv("Census_Data_Original.csv")
+census_data <- census_data_original #Hand off file so we can refer back to original
+
+```
+
+
+#Explore-Inspect the Dataset
+```{r Inspect_Medicare_and_Hospital_Datasets, message=F, error=F, eval=T, warning=F}
+head(medicare_data)
+head(hospital_data)
+#head(census_data_original)
+
+```
+
+********************************************************************************
+## Step 1: Collecting / Explore Data     part b ) Clean Datasets
+********************************************************************************
+
+# Clean the zipcode entries and write file to folder
+```{r Census_Data_Modify, message=F, error=F, eval=T, warning=F}
+# Removing the first 5 characters in column 2 from row 2 onwards
+census_data[2:nrow(census_data), 2] <- substring(census_data[2:nrow(census_data), 2], 7)
+
+# Exclude the first row
+census_data <- census_data[-1,]
+write.csv(census_data, "Census_data_modified.csv", row.names = FALSE)
+census_data_modified <- read.csv("Census_data_modified.csv")
+
+```
+
+#Explore-Inspect the Dataset
+```{r Inspect_Census_Data_Modified, message=F, error=F, eval=T, warning=F}
+#head(census_data_modified)
+
+```
+
+********************************************************************************
+ ## Step 2: Prepare Data          part b) Joining the Datasets
+********************************************************************************
+
+```{r Merging_MIHPS_HGI, message=F, error=F, eval=T, warning=F}
+
+MIHPS_HGI_Merged <- merge(medicare_data, hospital_data, by.x = "Rndrng_Prvdr_CCN", by.y = "Provider.ID")
+write.csv(MIHPS_HGI_Merged, "MIHPS_HGI_Merged.csv", row.names = FALSE)
+
+```
+
+#Merge the Datasets
+```{r Merging_Census_Data_MIHPS_HGI_Merge, message=F, error=F, eval=T, warning=F}
+Final_data_original<- merge(MIHPS_HGI_Merged, census_data_modified, by.x = "Rndrng_Prvdr_Zip5", by.y = "NAME")
+write.csv(Final_data_original, "Final_data_original.csv", row.names = FALSE)
+
+```
+
+#Explore-Inspect the Dataset
+```{r Inspect_Final_Data_Original, message=F, error=F, eval=T, warning=F}
+#head(Final_data_original)
+
+```
+
+## Cleaning The Final Data After Merging 
+```{r Inspect_Data, message=F, error=F, eval=T, warning=F}
+# Inspect data
+#head(Final_data_original)
+#tail(Final_data_original)
+#summary(Final_data_original)
+
+```
+
+
+Clean the Datasets
+```{r Clean_Data, message=F, error=F, eval=T, warning=F}
+
+# remove rows with missing values
+Final_data_cleaned <- Final_data_original[complete.cases(Final_data_original),]
+# Handle duplicates
+Final_data_cleaned <- unique(Final_data_original)
+# Removing columns from 47 onwards
+Final_data_cleaned <- select(Final_data_original, -47:-ncol(Final_data_original))
+#  Rename the column
+Final_data_cleaned <- rename(Final_data_cleaned, Pop_total = B16010_001E, Margin_error_poptotal = B16010_001M)
+Final_data_cleaned <- rename(Final_data_cleaned, 
+                                    Hospital_name = Hospital.Name, Zip_code = ZIP.Code, 
+                                    County_name = County.Name, Phone_number = Phone.Number,
+                                    Hospital_type = Hospital.Type, Hospital_ownership = Hospital.Ownership, 
+                                    Emergency_services = Emergency.Services)
+
+```
+
+
+********************************************************************************
+## Step 2: Prepare Data         part b) Remove, Code, and/or Impute Data
+********************************************************************************
+
+```{r Create_new_variable, message=F, error=F, eval=T, warning=F}
+# Creating a new computed variable
+Final_data_cleaned$cost_to_pat <- (Final_data_cleaned$Avg_Tot_Pymt_Amt - Final_data_cleaned$Avg_Mdcr_Pymt_Amt )
+
+```
+
+
+```{r Convert_Data_to_Numeric, message=F, error=F, eval=T, warning=F}
+# convert variables to numeric type
+Final_data_cleaned$Pop_total <- as.numeric(Final_data_cleaned$Pop_total)
+Final_data_cleaned$Margin_error_poptotal <- as.numeric(Final_data_cleaned$Margin_error_poptotal)
+# Creating a new computed variable
+Final_data_cleaned$adjusted_pop <- (Final_data_cleaned$Pop_total - Final_data_cleaned$Margin_error_poptotal)
+
+```
+
+
+```{r save_to_file, message=F, error=F, eval=T, warning=F}
+# saving it new csv file
+write.csv(Final_data_cleaned, "Final_data_cleaned.csv", row.names = FALSE)
+
+```
+
+```{r Inpsect_Final_Data_Cleaned, message=F, error=F, eval=T, warning=F}
+#head(Final_data_cleaned) 
+
+```
+
+********************************************************************************
+## Step 2: Explore / Prepare Data     part c) Variable Selection
+********************************************************************************
+
+```{r AMI_Filtering, message=F, error=F, eval=T, warning=F}
+Final_data_cleaned_AMI <- Final_data_cleaned %>% 
+  filter(DRG_Cd %in% c("246", "247", "248", "249", "250", "251","280","281","282"))
+
+#head(Final_data_cleaned_AMI)
+
+```
+
+
+```{r CABG_Filtering, message=F, error=F, eval=T, warning=F}
+Final_data_cleaned_CABG <- Final_data_cleaned %>% 
+  filter(DRG_Cd %in% c("231", "232", "233", "234", "235", "236"))
+#head(Final_data_cleaned_CABG)
+
+```
+

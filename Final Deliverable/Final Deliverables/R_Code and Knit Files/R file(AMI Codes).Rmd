@@ -1,0 +1,382 @@
+---
+title: "Estimating Medicare Costs for AMI"
+author: "Team 02 (Aditya Dube and Richard Budden)"
+header-includes:
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+date: "4/15/2023"
+output:
+  pdf_document: default
+  html documnet: default
+---
+
+#-#-# Predicting Medicare for AMI #-#-#
+
+      ## Step 0: Basic Setup - Install Packages / Load Libraries
+      
+      ## Step 1: Collecting Data
+                 part a) Import Datasets
+                 part b) Joining the Datasets
+
+      ## Step 2: Explore / Prepare Data
+                 part a) Remove, Code, and/or Impute Data
+                 part b) Variable Selection
+                 part c) Group by State/Summarize Data
+                 
+      ## Step 3: Visualization of Data
+                 part a) Histogram
+                 part b) United States Heat Map
+                 
+      ## Step 4: Creating Training and Test Datasets
+      
+      ## Step 5: Build and Evaluate Linear Regression Model
+
+      ## Step 6: Build and Evaluate CART Model
+      
+      ## Step 7: Build and Evaluate Artifical Neural Network  Model (Feeforward ANN)
+                  
+
+********************************************************************************
+                ## Step 0: Basic Setup - Install Packages / Load Libraries
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+#install.packages("tree")
+
+library(dplyr)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(maps)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(neuralnet)
+#conflict_prefer("prune", "rpart")
+
+```
+
+********************************************************************************
+          ## Step 1: Collecting Data       part a) Import Datasets
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+# Load the three datasets
+hospital_data <- read.csv("Hospital General Information.csv")
+medicare_data <- read.csv("Medicare_Inpatient_Hospital_by_Provider_and_Service_2018_data.csv")
+census_data <- read.csv("Census data.csv")
+
+```
+
+Initial look at the Structure of the Datasets
+
+```{r message=F, error=F, eval=T, warning=F}
+##  Structure of the dataset
+str(hospital_data)
+str(medicare_data)
+str(census_data)
+
+```
+
+********************************************************************************
+                ## Step 1: Collecting Data       part b) Joining the Datasets
+********************************************************************************
+
+Used the dplyr package in R to join multiple datasets based on a common variable.
+We Joined the medicare and hospital data by Provider ID and by Zip code
+
+
+```{r message=F, error=F, eval=T, warning=F}
+final_data <- inner_join(medicare_data, hospital_data, by = c("Provider_ID","ZIP_Code"))
+
+```
+
+
+
+********************************************************************************
+    ## Step 2: Explore / Prepare Data     part a) Remove, Code, and/or Impute Data
+********************************************************************************
+                 
+Data cleaning: 
+Before analyzing the data, we need to clean it by removing missing values, 
+fixing formatting issues, and dealing with outliers
+
+```{r message=F, error=F, eval=T, warning=F}
+# Remove rows with missing values
+final_data <- final_data[complete.cases(final_data), ]
+head(final_data)
+
+```
+
+
+********************************************************************************
+          ## Step 2: Explore / Prepare Data     part b) Variable Selection
+********************************************************************************
+
+Data wrangling and variable selection: 
+We use the tidyverse package in R to manipulate and select variables from our dataset.
+
+
+```{r message=F, error=F, eval=T, warning=F}
+# Select relevant variables
+final_data_AMI <- filter(final_data,DRG_Cd %in% c("246","247","248","249","250","251","280","281"))
+#sum(final_data_AMI[, 'Total_discharges']) #total discharge sum = 258186
+
+
+selected_data <- final_data_AMI %>%
+  select("Provider_ID", "ZIP_Code","Ave_medical_payment", "Total_discharges", "Ave_covered_charges", "Ave_total_payment","Hospital.Type","Hospital.Ownership",
+         "Hospital.overall.rating","State", "DRG_Cd")
+attach (selected_data)
+
+# Concerting character variable to string variables
+selected_data[sapply(selected_data, is.character)] <- lapply(selected_data[sapply(selected_data, is.character)], 
+                                       as.factor)
+
+```
+
+
+********************************************************************************
+        ## Step 2: Explore / Prepare Data     part c) Group by State/Summarize Data 
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+# Calculate the average costs per state
+Avg_Mdcr_Pymt_Amt  <- selected_data %>%
+  group_by(State) %>%
+  summarise(Avg_Mdcr_Pymt  = Ave_medical_payment)
+
+Avg_Mdcr_Pymt_Amt <- Avg_Mdcr_Pymt_Amt[1:15537, ]
+
+```
+
+
+********************************************************************************
+          ## Step 3: Visualization of Data     part a) Histogram 
+********************************************************************************
+
+     
+```{r message=F, error=F, eval=T, warning=F}
+# Create a histogram of average costs per state
+ggplot(selected_data , aes(x = Ave_medical_payment)) +
+  geom_histogram(binwidth = 5000, col = 'green') +
+  labs(title = "Histogram of Average Medicare Payments(AMI Codes)", x = "Average Total Payments")
+
+```
+
+
+********************************************************************************
+        ## Step 3: Visualization of Data     part b) United States Heat Map 
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+# Create a US density map of average costs per state
+us_map <- map_data("state")
+
+
+usmap <- cbind(us_map,Avg_Mdcr_Pymt_Amt)
+
+head(usmap)
+tail(usmap)
+
+ggplot(usmap, aes(x = long, y = lat, group = group, fill = Avg_Mdcr_Pymt)) +
+  geom_polygon(color ="black") +
+  scale_fill_gradient(low = "white", high = "red", na.value = "lightgrey") +
+  theme_void() + coord_map() +
+  labs(title = "Average Medicare Payments by State (AMI Codes)")
+
+
+```
+
+
+********************************************************************************
+          ## Step 4: Creating Training and Test Datasets
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+# Split the data into training and testing sets
+set.seed(123)
+library(caret)
+trainIndex <- createDataPartition(selected_data$Ave_medical_payment, p = 0.7, list = FALSE)
+train <- selected_data[trainIndex, ]
+test <- selected_data[-trainIndex, ]
+```
+
+
+********************************************************************************
+          ## Step 5: Build and Evaluate Linear Regression Model
+********************************************************************************
+
+```{r message=F, error=F, eval=T, warning=F}
+# Build the linear regression model
+model <- lm(Ave_medical_payment ~ Total_discharges + Ave_covered_charges + Ave_total_payment+ Hospital.overall.rating+Hospital.Ownership, data = train)
+
+# Predict on the testing set
+predictions <- predict(model, newdata = test)
+
+
+# Check for the model assumptions
+par(mfrow = c(2, 2))
+plot(model)
+```
+
+
+Evaluate the performance of the Linear Model
+
+```{r message=F, error=F, eval=T, warning=F}
+#model 1
+
+RMSE(predictions, test$Ave_medical_payment)
+R2(predictions, test$Ave_medical_payment)
+```
+
+ 
+
+********************************************************************************
+          ## Step 6 Build and Evaluate CART Model (Regression Tree)
+********************************************************************************
+```{r}
+# Build the regression tree model
+model2 <- rpart(Ave_medical_payment ~ Total_discharges + Ave_covered_charges + Ave_total_payment+ Hospital.overall.rating+Hospital.Ownership, data = train, method = "anova")
+
+#Plot
+#install.packages("RGtk2")
+# Plot the tree						
+fancyRpartPlot(model2)
+
+# Predict on the testing set
+predictions <- predict(model2, newdata = test)
+
+#Model 2
+RMSE(predictions, test$Ave_medical_payment)
+R2(predictions, test$Ave_medical_payment)
+
+```
+
+
+```{r}
+printcp(model2)
+plotcp(model2)
+
+pfit = prune(model2, cp=model2$ptable[which.min(model2$cptable[,"xerror"]), "CP"])
+pfit
+```
+
+```{r message=F, error=F, eval=T, warning=F}
+# Build the regression tree model
+control_setting <- rpart.control(minsplit = 2, cp = .005, xval = 10)
+
+model2 <- rpart(Ave_medical_payment ~ Total_discharges + Ave_covered_charges + Ave_total_payment+ Hospital.overall.rating+Hospital.Ownership, data = train, method = "anova", control = control_setting)
+
+# Plot
+#install.packages("RGtk2")
+fancyRpartPlot(model2)
+# Predict on the testing set
+predictions <- predict(model2, newdata = test)
+
+RMSE(predictions, test$Ave_medical_payment)
+R2(predictions, test$Ave_medical_payment)
+
+```
+
+Evaluate the performance of the CART model
+
+```{r message=F, error=F, eval=T, warning=F}
+#Model 2
+RMSE(predictions, test$Ave_medical_payment)
+R2(predictions, test$Ave_medical_payment)
+
+```
+
+Data pruning for Regression Tree
+
+```{r message=F, error=F, eval=T, warning=F}
+
+# Prune the tree, display pruned tree
+library(tree)
+
+tree.model <- tree(Ave_medical_payment ~ Total_discharges + Ave_covered_charges + Ave_total_payment+ Hospital.overall.rating+Hospital.Ownership, data = train)
+prune.data <- prune.tree(tree.model)
+plot(prune.data, col = "blue")
+
+```
+
+
+
+********************************************************************************
+    ## Step 7 : Build and Evaluate Artifical Neural Network  Model (Feedforward ANN)
+********************************************************************************
+Feedforward ANN
+
+
+```{r message=F, error=F, eval=T, warning=F}
+
+## Scaling
+scale_data <- final_data_AMI %>%
+  select("Ave_medical_payment", "Total_discharges", "Ave_covered_charges", "Ave_total_payment")
+
+set.seed(123)
+trainIndex2 <- createDataPartition(scale_data$Ave_medical_payment, p = 0.7, list = FALSE)
+train2 <- scale_data[trainIndex2, ]
+test2 <- scale_data[-trainIndex2, ]
+
+```
+
+
+Min-Max Normalization and Scaling the input variable
+
+```{r}
+#transform your factor to numeric.
+#tranform it to a factor and the to numeric
+selected_data$Hospital.Ownership <- as.numeric(as.factor(Hospital.Ownership))
+selected_data$Hospital.overall.rating <- as.numeric(as.factor(Hospital.overall.rating))
+
+```
+
+```{r message=F, error=F, eval=T, warning=F}
+
+selected_data$Ave_medical_payment <- (selected_data$Ave_medical_payment - min(selected_data$Ave_medical_payment)) / (max(selected_data$Ave_medical_payment) - min(selected_data$Ave_medical_payment))
+
+selected_data$Total_discharges <- (selected_data$Total_discharges - min(selected_data$Total_discharges)) / (max(selected_data$Total_discharges) - min(selected_data$Total_discharges))
+
+selected_data$Ave_covered_charges <- (selected_data$Ave_covered_charges - min(selected_data$Ave_covered_charges)) / (max(selected_data$Ave_covered_charges) - min(selected_data$Ave_covered_charges))
+
+ selected_data$Ave_total_payment <- (selected_data$Ave_total_payment - min(selected_data$Ave_total_payment)) / (max(selected_data$Ave_total_payment) - min(selected_data$Ave_total_payment))
+ 
+selected_data$Hospital.overall.rating <- (selected_data$Hospital.overall.rating - min(selected_data$Hospital.overall.rating)) / (max(selected_data$Hospital.overall.rating) - min(selected_data$Hospital.overall.rating))
+ 
+selected_data$Hospital.Ownership <- (selected_data$Hospital.Ownership - min(selected_data$Hospital.Ownership)) / (max(selected_data$Hospital.Ownership) - min(selected_data$Hospital.Ownership))
+ 
+
+set.seed(123)
+inp <- sample(2, nrow(selected_data), replace = TRUE, prob = c(0.7, 0.3))
+training_data <- selected_data[inp==1, ]
+test_data <- selected_data[inp==2, ]
+
+```
+
+```{r message=F, error=F, eval=T, warning=F}
+
+#from RBloggers "Selecting the number of neurons in the hidden layer of a neural network"
+#A Variation of this rule suggests to choose a number of hidden neurons between one and the number of Inputs minus the number of outputs
+
+#Upon our Model with 5 Inputs and 1 Output we set Hidden Levels at 4 (5-1=4) 
+
+
+set.seed(333)
+model3 <- neuralnet(Ave_medical_payment ~ Total_discharges + Ave_covered_charges + Ave_total_payment+Hospital.Ownership+ Hospital.overall.rating,
+               data = training_data,
+               hidden = 4,
+               linear.output = FALSE)
+
+# Predict on the testing set
+predictions <- predict(model3, test_data)
+
+# Evaluate the performance of the model
+RMSE(predictions, test_data$Ave_medical_payment)
+R2(predictions, test_data$Ave_medical_payment)
+
+# plot neural network
+plot(model3, rep = "best")
+
+```
